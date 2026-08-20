@@ -1,0 +1,202 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<title>Lithuania Jump - Playable</title>
+<style>
+html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#dff3ff;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;touch-action:none}
+#game{display:block;width:100vw;height:100vh}
+#hud{position:fixed;top:max(12px,env(safe-area-inset-top));left:12px;right:12px;display:flex;justify-content:space-between;pointer-events:none;font-weight:800}
+.p{background:rgba(255,255,255,.82);padding:8px 12px;border-radius:999px}
+#stage{position:fixed;top:max(58px,calc(env(safe-area-inset-top) + 48px));left:50%;transform:translateX(-50%);background:#17324de6;color:white;padding:7px 12px;border-radius:999px;font-size:13px;font-weight:800;white-space:nowrap}
+#controls{position:fixed;left:0;right:0;bottom:max(18px,env(safe-area-inset-bottom));display:flex;justify-content:center;gap:28px}
+.ctrl{width:88px;height:60px;border:0;border-radius:22px;background:rgba(23,50,77,.9);color:white;font-size:30px;font-weight:900;box-shadow:0 8px 24px #17324d33;-webkit-user-select:none;user-select:none}
+#overlay{position:fixed;inset:0;display:grid;place-items:center;padding:20px;background:rgba(225,244,255,.45)}
+#card{width:min(90vw,430px);padding:26px;background:rgba(255,255,255,.92);border-radius:26px;text-align:center;box-shadow:0 20px 60px #17324d33}
+h1{margin:0 0 10px;font-size:42px;line-height:.98;color:#17324d}
+p{line-height:1.6;color:#294b69}
+#start,#retry{border:0;border-radius:999px;background:#17324d;color:white;font-size:17px;font-weight:900;padding:14px 24px}
+.note{font-size:12px;opacity:.65}
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="hud"><div class="p">🇱🇹 <span id="score">0 m</span></div><div class="p">🧡 <span id="items">0</span></div></div>
+<div id="stage">🏛️ Vilnius</div>
+<div id="controls">
+  <button class="ctrl" id="left" aria-label="left">←</button>
+  <button class="ctrl" id="right" aria-label="right">→</button>
+</div>
+<div id="overlay">
+  <div id="card">
+    <h1>Lithuania<br>Jump</h1>
+    <p>ふたりでリトアニアの思い出をたどりながら上へ。<br><b>下の ← → ボタンで移動</b>します。足場に着くと自動でジャンプします。</p>
+    <button id="start">ゲーム開始</button>
+    <div class="note">まずは遊びやすさ優先版です</div>
+  </div>
+</div>
+<script>
+(function(){
+"use strict";
+var canvas=document.getElementById("game"),ctx=canvas.getContext("2d");
+var scoreEl=document.getElementById("score"),itemsEl=document.getElementById("items");
+var overlay=document.getElementById("overlay"),stageEl=document.getElementById("stage");
+var W=0,H=0,DPR=1,running=false,last=0,camera=0,score=0,count=0,move=0;
+var player,plats=[],gems=[];
+var stages=[
+ {m:0,n:"🏛️ Vilnius"},
+ {m:300,n:"🏰 Trakai"},
+ {m:700,n:"🌾 Šiauliai"},
+ {m:1200,n:"❤️ Convention"},
+ {m:1800,n:"✈️ Helsinki & Home"}
+];
+
+function resize(){
+ DPR=Math.min(2,window.devicePixelRatio||1); W=window.innerWidth; H=window.innerHeight;
+ canvas.width=Math.floor(W*DPR);canvas.height=Math.floor(H*DPR);
+ ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+window.addEventListener("resize",resize);resize();
+
+function rnd(a,b){return a+Math.random()*(b-a)}
+function sy(y){return y-camera}
+
+function reset(){
+ running=true;camera=0;score=0;count=0;move=0;plats=[];gems=[];
+ player={x:W/2,y:H*.68,vx:0,vy:-420,w:30,h:38};
+ var y=H*.80;
+ plats.push({x:W/2-90,y:y,w:180});
+ for(var i=1;i<24;i++){y-=72;addPlatform(y);}
+ scoreEl.textContent="0 m";itemsEl.textContent="0";stageEl.textContent=stages[0].n;
+ overlay.style.display="none";last=performance.now();requestAnimationFrame(loop);
+}
+function addPlatform(y){
+ var w=rnd(115,175);
+ var x=rnd(12,Math.max(13,W-w-12));
+ plats.push({x:x,y:y,w:w});
+ if(Math.random()<.45)gems.push({x:x+w/2,y:y-22,taken:false});
+}
+
+function setMove(v){move=v}
+function bind(btn,v){
+ btn.addEventListener("pointerdown",function(e){e.preventDefault();setMove(v)});
+ btn.addEventListener("pointerup",function(e){e.preventDefault();if(move===v)setMove(0)});
+ btn.addEventListener("pointercancel",function(){if(move===v)setMove(0)});
+ btn.addEventListener("pointerleave",function(){if(move===v)setMove(0)});
+}
+bind(document.getElementById("left"),-1);bind(document.getElementById("right"),1);
+
+window.addEventListener("keydown",function(e){
+ if(e.key==="ArrowLeft")move=-1;if(e.key==="ArrowRight")move=1;
+});
+window.addEventListener("keyup",function(e){
+ if((e.key==="ArrowLeft"&&move<0)||(e.key==="ArrowRight"&&move>0))move=0;
+});
+
+function update(dt){
+ var prevBottom=player.y+player.h/2;
+ player.vx += move*720*dt;
+ if(move===0)player.vx*=Math.pow(.04,dt);
+ if(player.vx>220)player.vx=220;if(player.vx<-220)player.vx=-220;
+ player.vy+=780*dt;
+ player.x+=player.vx*dt;player.y+=player.vy*dt;
+ if(player.x<15){player.x=15;player.vx=60}
+ if(player.x>W-15){player.x=W-15;player.vx=-60}
+
+ if(player.vy>0){
+   var newBottom=player.y+player.h/2;
+   for(var i=0;i<plats.length;i++){
+     var p=plats[i];
+     if(prevBottom<=p.y && newBottom>=p.y &&
+        player.x+player.w/2>p.x && player.x-player.w/2<p.x+p.w){
+       player.y=p.y-player.h/2;
+       player.vy=-455;
+       break;
+     }
+   }
+ }
+
+ var onscreen=sy(player.y);
+ if(onscreen<H*.38){
+   var d=H*.38-onscreen;
+   camera-=d;
+ }
+ score=Math.max(score,Math.floor((-camera)/8));
+ scoreEl.textContent=score+" m";
+
+ var st=stages[0];
+ for(var s=0;s<stages.length;s++)if(score>=stages[s].m)st=stages[s];
+ stageEl.textContent=st.n;
+
+ for(var g=0;g<gems.length;g++){
+   var gem=gems[g];if(gem.taken)continue;
+   var dx=player.x-gem.x,dy=player.y-gem.y;
+   if(dx*dx+dy*dy<700){gem.taken=true;count++;itemsEl.textContent=count;}
+ }
+
+ var top=999999;
+ for(var j=0;j<plats.length;j++)if(plats[j].y<top)top=plats[j].y;
+ while(top>camera-220){top-=72;addPlatform(top);}
+ plats=plats.filter(function(p){return p.y<camera+H+100});
+ gems=gems.filter(function(g){return g.y<camera+H+100});
+
+ if(sy(player.y)>H+80)endGame();
+}
+
+function bg(){
+ var grad=ctx.createLinearGradient(0,0,0,H);
+ grad.addColorStop(0,"#cdeaff");grad.addColorStop(1,"#f8fcff");
+ ctx.fillStyle=grad;ctx.fillRect(0,0,W,H);
+
+ ctx.globalAlpha=.24;ctx.fillStyle="#496985";
+ var ground=H-80+camera*.04;ctx.fillRect(0,ground,W,H-ground);
+ ctx.fillRect(W*.13,ground-80,18,80);
+ ctx.beginPath();ctx.moveTo(W*.13+9,ground-108);ctx.lineTo(W*.13-2,ground-80);ctx.lineTo(W*.13+20,ground-80);ctx.closePath();ctx.fill();
+ ctx.globalAlpha=1;
+}
+
+function render(){
+ bg();
+ for(var i=0;i<plats.length;i++){
+   var p=plats[i],y=sy(p.y);if(y<-30||y>H+30)continue;
+   ctx.fillStyle="#708a9e";ctx.fillRect(p.x,y,p.w,13);
+   ctx.fillStyle="#d7e6ef";ctx.fillRect(p.x+5,y+2,p.w-10,3);
+ }
+ for(var j=0;j<gems.length;j++){
+   var g=gems[j];if(g.taken)continue;var gy=sy(g.y);if(gy<-30||gy>H+30)continue;
+   ctx.fillStyle="#e99c18";ctx.beginPath();ctx.arc(g.x,gy,8,0,Math.PI*2);ctx.fill();
+ }
+ var py=sy(player.y);
+ // couple as two simple travelers
+ ctx.fillStyle="#17324d";ctx.fillRect(player.x-13,py-2,12,25);
+ ctx.fillStyle="#7b4161";ctx.fillRect(player.x+2,py+2,12,23);
+ ctx.fillStyle="#ffd6bd";ctx.beginPath();ctx.arc(player.x-7,py-10,7,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#f2c4a5";ctx.beginPath();ctx.arc(player.x+8,py-7,7,0,Math.PI*2);ctx.fill();
+
+ // flag scarf
+ ctx.lineWidth=3;
+ ctx.strokeStyle="#fdb913";ctx.beginPath();ctx.moveTo(player.x-8,py+3);ctx.lineTo(player.x-27,py-3);ctx.stroke();
+ ctx.strokeStyle="#006a44";ctx.beginPath();ctx.moveTo(player.x-8,py+7);ctx.lineTo(player.x-28,py+4);ctx.stroke();
+ ctx.strokeStyle="#c1272d";ctx.beginPath();ctx.moveTo(player.x-8,py+11);ctx.lineTo(player.x-25,py+11);ctx.stroke();
+}
+
+function loop(now){
+ if(!running)return;
+ var dt=(now-last)/1000;last=now;if(dt>.03)dt=.03;
+ update(dt);render();if(running)requestAnimationFrame(loop);
+}
+function endGame(){
+ running=false;
+ document.getElementById("card").innerHTML=
+   '<h1>Journey Over</h1><p>到達高度 <b>'+score+' m</b><br>集めた思い出 <b>'+count+' 個</b></p>'+
+   '<button id="retry">もう一度</button><div class="note">← → を押しっぱなしで移動できます</div>';
+ overlay.style.display="grid";
+ document.getElementById("retry").addEventListener("click",reset);
+}
+document.getElementById("start").addEventListener("click",reset);
+render();
+})();
+</script>
+</body>
+</html>
